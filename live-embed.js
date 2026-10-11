@@ -3,6 +3,8 @@ let viz=null,sequence=0,library=null,timer=null,slowTimer=null,current=null,devi
 window.embedEvidence={state:'idle',report:null,events:[]};
 const record=(type,details={})=>window.embedEvidence.events.push({type,at:new Date().toISOString(),...details});
 const phone=()=>matchMedia('(max-width:1000px)').matches;
+// Homepage: published dashboard (800 desktop / 1200 phone) plus the full Tableau toolbar.
+const initialHeight=report=>report.id==='global-footprint'?(phone()?'1227px':'827px'):(phone()?'1700px':'1400px');
 export function unloadReport(){sequence++;clearTimeout(timer);clearTimeout(slowTimer);document.querySelector('#viz-host')?.replaceChildren();viz=null;current=null;window.embedEvidence.state='idle';}
 export async function loadReport(report){
  unloadReport();current=report;const request=sequence,host=document.querySelector('#viz-host'),status=document.querySelector('#embed-status');
@@ -15,7 +17,19 @@ export async function loadReport(report){
  try{
  library||=import('https://tableauprd.uky.edu/javascripts/api/tableau.embedding.3.latest.min.js');
  const {TableauViz,TableauEventType}=await library;if(request!==sequence)return;
- viz=new TableauViz();viz.id=report.id==='international-alumni'?'alumni-viz':'report-viz';viz.src=report.embedUrl;viz.width='100%';device=phone()?'phone':'default';viz.device=device;viz.height=phone()?'1700px':'1400px';viz.toolbar='bottom';
+ viz=new TableauViz();viz.id=report.id==='international-alumni'?'alumni-viz':'report-viz';viz.src=report.embedUrl;viz.width='100%';device=phone()?'phone':'default';viz.device=device;viz.height=initialHeight(report);viz.toolbar='bottom';
+ if(report.id==='global-footprint'){
+  viz.classList.add('overview-viz');
+  viz.addEventListener(TableauEventType.FirstVizSizeKnown,e=>{
+   if(request!==sequence)return;
+   const size=e.detail.vizSize,{minSize,maxSize}=size.sheetSize;
+   // Read supported sizing metadata; leave the University's workbook and device layout intact.
+   if(minSize?.height>0&&minSize.height===maxSize?.height&&Number.isFinite(size.chromeHeight)){
+    viz.height=`${minSize.height+size.chromeHeight}px`;viz.resize();
+    record('overview-sized',{dashboardHeight:minSize.height,toolbarHeight:size.chromeHeight,height:viz.height});
+   }
+  });
+ }
  viz.addEventListener(TableauEventType.FirstInteractive,()=>{if(request!==sequence)return;clearTimeout(timer);clearTimeout(slowTimer);window.embedEvidence.state='interactive';status.textContent=`Live ${report.title} report loaded from UK’s Tableau server.`;record('firstinteractive');});
  viz.addEventListener(TableauEventType.FilterChanged,e=>{if(request===sequence)record('filterchanged',{fieldName:e.detail?.fieldName||null});});
  viz.addEventListener(TableauEventType.ParameterChanged,e=>{if(request===sequence)record('parameterchanged',{parameterName:e.detail?.parameterName||null});});
@@ -25,4 +39,4 @@ export async function loadReport(report){
  host.append(viz);
  }catch(error){if(request!==sequence)return;library=null;record('module-error',{message:error.message});fallback('The live report could not load. Open the original report above, or try Reload.');console.error('Tableau embedding:',error);}
 }
-window.addEventListener('resize',()=>{if(!viz||!current)return;const next=phone()?'phone':'default';if(next!==device){loadReport(current);return;}viz.height=phone()?'1700px':'1400px';viz.resize();});
+window.addEventListener('resize',()=>{if(!viz||!current)return;const next=phone()?'phone':'default';if(next!==device){loadReport(current);return;}if(current.id!=='global-footprint')viz.height=initialHeight(current);viz.resize();});
